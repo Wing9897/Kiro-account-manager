@@ -1,0 +1,414 @@
+import { useAccountsStore } from '@/store/accounts'
+import { Card, CardContent, CardHeader, CardTitle } from '../ui'
+import { Button } from '../ui'
+import { Eye, EyeOff, RefreshCw, Clock, Trash2, Download, Upload, Globe, Repeat, Palette, Moon, Sun, Fingerprint, Info } from 'lucide-react'
+import { useState } from 'react'
+
+// 主题配置
+const themes = [
+  { id: 'default', name: '默认蓝', color: '#3b82f6' },
+  { id: 'purple', name: '优雅紫', color: '#a855f7' },
+  { id: 'emerald', name: '翠绿', color: '#10b981' },
+  { id: 'orange', name: '活力橙', color: '#f97316' },
+  { id: 'rose', name: '玫瑰红', color: '#f43f5e' },
+  { id: 'cyan', name: '清新青', color: '#06b6d4' },
+  { id: 'amber', name: '琥珀金', color: '#f59e0b' },
+  { id: 'teal', name: '水鸭蓝', color: '#14b8a6' },
+  { id: 'indigo', name: '靛蓝', color: '#6366f1' },
+  { id: 'lime', name: '青柠', color: '#84cc16' },
+  { id: 'pink', name: '粉红', color: '#ec4899' },
+  { id: 'slate', name: '石板灰', color: '#64748b' },
+  { id: 'zinc', name: '锌灰', color: '#71717a' },
+]
+
+export function SettingsPage() {
+  const { 
+    privacyMode, 
+    setPrivacyMode,
+    autoRefreshEnabled,
+    autoRefreshInterval,
+    setAutoRefresh,
+    proxyEnabled,
+    proxyUrl,
+    setProxy,
+    autoSwitchEnabled,
+    autoSwitchThreshold,
+    autoSwitchInterval,
+    setAutoSwitch,
+    theme,
+    darkMode,
+    setTheme,
+    setDarkMode,
+    accounts,
+    exportAccounts,
+    importFromExportData
+  } = useAccountsStore()
+
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [tempProxyUrl, setTempProxyUrl] = useState(proxyUrl)
+
+  const handleExport = async () => {
+    setIsExporting(true)
+    try {
+      const data = exportAccounts()
+      const json = JSON.stringify(data, null, 2)
+      const filename = `kiro-accounts-${new Date().toISOString().slice(0, 10)}.json`
+      const success = await window.api.exportToFile(json, filename)
+      if (success) {
+        alert(`已导出 ${data.accounts.length} 个账号`)
+      }
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleImport = async () => {
+    setIsImporting(true)
+    try {
+      const result = await window.api.importFromFile()
+      if (result) {
+        const data = JSON.parse(result)
+        const importResult = importFromExportData(data)
+        alert(`导入完成：成功 ${importResult.success} 个，失败 ${importResult.failed} 个`)
+      }
+    } catch (e) {
+      alert(`导入失败: ${e instanceof Error ? e.message : '未知错误'}`)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  const handleClearData = () => {
+    if (confirm('确定要清除所有账号数据吗？此操作不可恢复！')) {
+      if (confirm('再次确认：这将删除所有账号、分组和标签数据！')) {
+        // 清除所有数据
+        Array.from(accounts.keys()).forEach(id => {
+          useAccountsStore.getState().removeAccount(id)
+        })
+        alert('所有数据已清除')
+      }
+    }
+  }
+
+  return (
+    <div className="p-6 space-y-6 max-w-2xl mx-auto">
+      <div>
+        <h1 className="text-2xl font-bold">设置</h1>
+        <p className="text-muted-foreground">配置应用的各项功能</p>
+      </div>
+
+      {/* 主题设置 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Palette className="h-4 w-4" />
+            主题设置
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 深色模式 */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">深色模式</p>
+              <p className="text-sm text-muted-foreground">切换深色/浅色主题</p>
+            </div>
+            <Button
+              variant={darkMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setDarkMode(!darkMode)}
+            >
+              {darkMode ? <Moon className="h-4 w-4 mr-2" /> : <Sun className="h-4 w-4 mr-2" />}
+              {darkMode ? '深色' : '浅色'}
+            </Button>
+          </div>
+
+          {/* 主题颜色 */}
+          <div className="pt-2 border-t">
+            <p className="font-medium mb-3">主题颜色</p>
+            <div className="flex flex-wrap gap-2">
+              {themes.map((t) => (
+                <button
+                  key={t.id}
+                  className={`group relative w-8 h-8 rounded-full transition-all ${
+                    theme === t.id 
+                      ? 'ring-2 ring-primary ring-offset-2 scale-110' 
+                      : 'hover:scale-110 hover:shadow-md'
+                  }`}
+                  style={{ backgroundColor: t.color }}
+                  onClick={() => setTheme(t.id)}
+                  title={t.name}
+                >
+                  <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity bg-popover px-1.5 py-0.5 rounded shadow-sm border pointer-events-none z-10">
+                    {t.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 隐私设置 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            {privacyMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            隐私设置
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">隐私模式</p>
+              <p className="text-sm text-muted-foreground">隐藏邮箱和账号敏感信息</p>
+            </div>
+            <Button
+              variant={privacyMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => setPrivacyMode(!privacyMode)}
+            >
+              {privacyMode ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+              {privacyMode ? '已开启' : '已关闭'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Token 刷新设置 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            自动刷新
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">自动刷新</p>
+              <p className="text-sm text-muted-foreground">Token 过期前自动刷新，并同步更新账户信息</p>
+            </div>
+            <Button
+              variant={autoRefreshEnabled ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAutoRefresh(!autoRefreshEnabled)}
+            >
+              {autoRefreshEnabled ? '已开启' : '已关闭'}
+            </Button>
+          </div>
+
+          {autoRefreshEnabled && (
+            <>
+              <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3 space-y-1">
+                <p>• Token 即将过期时自动刷新，保持登录状态</p>
+                <p>• Token 刷新后自动更新账户用量、订阅等信息</p>
+                <p>• 开启自动换号时，会定期检查所有账户余额</p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div>
+                  <p className="font-medium flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    检查间隔
+                  </p>
+                  <p className="text-sm text-muted-foreground">每隔多久检查一次账户状态</p>
+                </div>
+              <select
+                className="w-full h-9 px-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                value={autoRefreshInterval}
+                onChange={(e) => setAutoRefresh(true, parseInt(e.target.value))}
+              >
+                <option value="1">1 分钟</option>
+                <option value="3">3 分钟</option>
+                <option value="5">5 分钟</option>
+                <option value="10">10 分钟</option>
+                <option value="15">15 分钟</option>
+                <option value="20">20 分钟</option>
+                <option value="30">30 分钟</option>
+                <option value="45">45 分钟</option>
+                <option value="60">60 分钟</option>
+              </select>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 代理设置 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Globe className="h-4 w-4" />
+            代理设置
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">启用代理</p>
+              <p className="text-sm text-muted-foreground">所有网络请求将通过代理服务器</p>
+            </div>
+            <Button
+              variant={proxyEnabled ? "default" : "outline"}
+              size="sm"
+              onClick={() => setProxy(!proxyEnabled, tempProxyUrl)}
+            >
+              {proxyEnabled ? '已开启' : '已关闭'}
+            </Button>
+          </div>
+
+          <div className="space-y-2 pt-2 border-t">
+            <label className="text-sm font-medium">代理地址</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="flex-1 h-9 px-3 rounded-lg border bg-background text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                value={tempProxyUrl}
+                onChange={(e) => setTempProxyUrl(e.target.value)}
+              />
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setProxy(proxyEnabled, tempProxyUrl)}
+                disabled={tempProxyUrl === proxyUrl}
+              >
+                保存
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              支持 HTTP/HTTPS/SOCKS5 代理，格式: protocol://host:port
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 自动换号设置 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Repeat className="h-4 w-4" />
+            自动换号
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">启用自动换号</p>
+              <p className="text-sm text-muted-foreground">余额不足时自动切换到其他可用账号</p>
+            </div>
+            <Button
+              variant={autoSwitchEnabled ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAutoSwitch(!autoSwitchEnabled)}
+            >
+              {autoSwitchEnabled ? '已开启' : '已关闭'}
+            </Button>
+          </div>
+
+          {autoSwitchEnabled && (
+            <>
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div>
+                  <p className="font-medium">余额阈值</p>
+                  <p className="text-sm text-muted-foreground">余额低于此值时自动切换</p>
+                </div>
+                <input
+                  type="number"
+                  className="w-20 h-9 px-3 rounded-lg border bg-background text-sm text-center focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  value={autoSwitchThreshold}
+                  min={0}
+                  onChange={(e) => setAutoSwitch(true, parseInt(e.target.value) || 0)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div>
+                  <p className="font-medium flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    检查间隔
+                  </p>
+                  <p className="text-sm text-muted-foreground">每隔多久检查一次余额</p>
+                </div>
+                <select
+                  className="h-9 px-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  value={autoSwitchInterval}
+                  onChange={(e) => setAutoSwitch(true, undefined, parseInt(e.target.value))}
+                >
+                  <option value="1">1 分钟</option>
+                  <option value="3">3 分钟</option>
+                  <option value="5">5 分钟</option>
+                  <option value="10">10 分钟</option>
+                  <option value="15">15 分钟</option>
+                  <option value="30">30 分钟</option>
+                </select>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 机器码管理提示 */}
+      <Card className="border-0 shadow-sm bg-purple-500/5 border-purple-500/20">
+        <CardContent className="py-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-500/10">
+              <Fingerprint className="h-5 w-5 text-purple-500" />
+            </div>
+            <div className="flex-1">
+              <p className="font-medium text-sm">机器码管理</p>
+              <p className="text-xs text-muted-foreground">
+                修改设备标识符、切号自动换码、账户机器码绑定等功能
+              </p>
+            </div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Info className="h-3 w-3" />
+              <span>请在侧边栏「机器码」中设置</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 数据管理 */}
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">数据管理</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">导出数据</p>
+              <p className="text-sm text-muted-foreground">将所有账号数据导出为 JSON 文件</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
+              <Download className="h-4 w-4 mr-2" />
+              {isExporting ? '导出中...' : '导出'}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t">
+            <div>
+              <p className="font-medium">导入数据</p>
+              <p className="text-sm text-muted-foreground">从 JSON 文件导入账号数据</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleImport} disabled={isImporting}>
+              <Upload className="h-4 w-4 mr-2" />
+              {isImporting ? '导入中...' : '导入'}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t">
+            <div>
+              <p className="font-medium text-destructive">清除所有数据</p>
+              <p className="text-sm text-muted-foreground">删除所有账号、分组和标签</p>
+            </div>
+            <Button variant="destructive" size="sm" onClick={handleClearData}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              清除
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
