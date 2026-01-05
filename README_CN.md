@@ -258,6 +258,11 @@ npx electron-builder --linux --arm64
 
 ## 📋 更新日志
 
+### v1.3.3 (2025-01-05)
+- 🍎 **macOS 机器码修复**: 修复修改机器码后刷新仍显示原始机器码的问题
+- 🍎 **macOS 权限修复**: macOS 上不再错误提示"需要管理员权限"
+- 🔗 **Kiro IDE 同步**: macOS 修改机器码时自动同步到 Kiro IDE 的 machineid 文件
+
 ### v1.3.2 (2025-01-02)
 - 🔄 **自动刷新定时器修复**: 修复 Token 未过期时自动刷新定时器不检查账户信息的问题
 - 🔄 **后台刷新更新修复**: 修复后台刷新结果不更新账户面板数据的问题
@@ -313,7 +318,7 @@ npx electron-builder --linux --arm64
 
 ## 📄 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [AGPL-3.0 License](LICENSE) 开源。
 
 ---
 

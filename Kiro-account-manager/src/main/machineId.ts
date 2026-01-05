@@ -125,6 +125,9 @@ export async function checkAdminPrivilege(): Promise<boolean> {
           return false
         }
       case 'macos':
+        // macOS 上写入用户目录不需要管理员权限
+        // 我们直接返回 true，因为可以写入 ~/Library/Application Support/
+        return true
       case 'linux':
         // 检查是否为 root
         return process.getuid?.() === 0
@@ -260,7 +263,25 @@ async function setWindowsMachineId(newMachineId: string): Promise<MachineIdResul
 
 async function getMacOSMachineId(): Promise<MachineIdResult> {
   try {
-    // 方法1: 使用 ioreg 获取硬件UUID
+    // 优先读取 override 文件（本应用设置的机器码）
+    const overridePath = path.join(app.getPath('userData'), 'machine-id-override')
+    if (fs.existsSync(overridePath)) {
+      const overrideId = fs.readFileSync(overridePath, 'utf-8').trim()
+      if (overrideId && isValidMachineId(overrideId)) {
+        return { success: true, machineId: overrideId }
+      }
+    }
+    
+    // 检查 Kiro IDE 的 machineid 文件
+    const kiroMachineIdPath = path.join(process.env.HOME || '', 'Library/Application Support/Kiro/machineid')
+    if (fs.existsSync(kiroMachineIdPath)) {
+      const kiroId = fs.readFileSync(kiroMachineIdPath, 'utf-8').trim()
+      if (kiroId && isValidMachineId(kiroId)) {
+        return { success: true, machineId: kiroId }
+      }
+    }
+
+    // 回退到硬件 UUID
     const { stdout } = await execAsync(
       "ioreg -rd1 -c IOPlatformExpertDevice | awk '/IOPlatformUUID/ { print $3 }'"
     )
@@ -269,8 +290,6 @@ async function getMacOSMachineId(): Promise<MachineIdResult> {
       return { success: true, machineId }
     }
 
-    // 方法2: 读取 /var/db/SystemConfiguration/com.apple.SystemConfiguration.GenerationID.plist
-    // 这个文件可以被修改
     return { success: false, error: '无法获取macOS机器码' }
   } catch (error) {
     return {
@@ -282,12 +301,27 @@ async function getMacOSMachineId(): Promise<MachineIdResult> {
 
 async function setMacOSMachineId(newMachineId: string): Promise<MachineIdResult> {
   // macOS 的硬件 UUID 无法直接修改
-  // 但我们可以修改应用层面的标识符
-  // 这里使用一个变通方案：创建一个覆盖文件
+  // 我们写入本应用的 override 文件，并同步到 Kiro IDE 的 machineid 文件
   const overridePath = path.join(app.getPath('userData'), 'machine-id-override')
+  const kiroMachineIdPath = path.join(process.env.HOME || '', 'Library/Application Support/Kiro/machineid')
 
   try {
+    // 写入本应用的 override 文件
     fs.writeFileSync(overridePath, newMachineId, 'utf-8')
+    
+    // 同步到 Kiro IDE 的 machineid 文件
+    try {
+      const kiroDir = path.dirname(kiroMachineIdPath)
+      if (!fs.existsSync(kiroDir)) {
+        fs.mkdirSync(kiroDir, { recursive: true })
+      }
+      fs.writeFileSync(kiroMachineIdPath, newMachineId, 'utf-8')
+      console.log('[MachineId] Synced to Kiro IDE machineid:', kiroMachineIdPath)
+    } catch (syncError) {
+      console.warn('[MachineId] Failed to sync to Kiro IDE:', syncError)
+      // 同步失败不影响主流程
+    }
+    
     return { success: true, machineId: newMachineId }
   } catch (error) {
     return {

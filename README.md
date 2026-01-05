@@ -258,6 +258,11 @@ The project is configured with GitHub Actions workflow for auto building all pla
 
 ## 📋 Changelog
 
+### v1.3.3 (2025-01-05)
+- 🍎 **macOS Machine ID Fix**: Fixed the issue where modified machine ID still showed the original ID after refresh
+- 🍎 **macOS Permission Fix**: macOS no longer incorrectly prompts "Admin privileges required"
+- 🔗 **Kiro IDE Sync**: macOS now automatically syncs machine ID to Kiro IDE's machineid file
+
 ### v1.3.2 (2025-01-02)
 - 🔄 **Auto Refresh Timer Fix**: Fixed the issue where auto refresh timer did not check account info when token is not expired
 - 🔄 **Background Refresh Update Fix**: Fixed the issue where background refresh results were not updating account panel data
@@ -313,7 +318,7 @@ The project is configured with GitHub Actions workflow for auto building all pla
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [AGPL-3.0 License](LICENSE).
 
 ---
 
