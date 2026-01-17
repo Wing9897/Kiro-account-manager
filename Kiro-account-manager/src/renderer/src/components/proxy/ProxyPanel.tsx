@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Play, Square, RefreshCw, Copy, Check, Server, Users, Activity, AlertCircle, Globe, Zap } from 'lucide-react'
+import { Play, Square, RefreshCw, Copy, Check, Server, Users, Activity, AlertCircle, Globe, Zap, Loader2, FileText } from 'lucide-react'
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Switch, Badge, Select } from '../ui'
 import { useAccountsStore } from '../../store/accounts'
 import { useTranslation } from '../../hooks/useTranslation'
+import { ProxyLogsDialog } from './ProxyLogsDialog'
 
 interface ProxyStats {
   totalRequests: number
@@ -21,6 +22,7 @@ interface ProxyConfig {
   logRequests: boolean
   maxRetries?: number
   preferredEndpoint?: 'codewhisperer' | 'amazonq'
+  autoStart?: boolean
 }
 
 export function ProxyPanel() {
@@ -40,6 +42,11 @@ export function ProxyPanel() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recentLogs, setRecentLogs] = useState<Array<{ time: string; path: string; status: number; tokens?: number }>>([])
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false)
+  const [syncSuccess, setSyncSuccess] = useState(false)
+  const [refreshSuccess, setRefreshSuccess] = useState(false)
+  const [showLogsDialog, setShowLogsDialog] = useState(false)
 
   const accounts = useAccountsStore(state => state.accounts)
 
@@ -65,13 +72,15 @@ export function ProxyPanel() {
 
   // 同步账号到反代池
   const syncAccounts = useCallback(async () => {
+    setIsSyncing(true)
+    setSyncSuccess(false)
     try {
       const proxyAccounts = Array.from(accounts.values())
-        .filter(acc => acc.credentials?.accessToken)
+        .filter(acc => acc.status === 'active' && acc.credentials?.accessToken)
         .map(acc => ({
           id: acc.id,
           email: acc.email,
-          accessToken: acc.credentials!.accessToken,
+          accessToken: acc.credentials.accessToken,
           refreshToken: acc.credentials?.refreshToken,
           profileArn: (acc as any).profileArn,
           expiresAt: acc.credentials?.expiresAt,
@@ -86,9 +95,13 @@ export function ProxyPanel() {
       if (result.success) {
         setAccountCount(result.accountCount || 0)
         await fetchStatus()
+        setSyncSuccess(true)
+        setTimeout(() => setSyncSuccess(false), 2000)
       }
     } catch (err) {
       console.error('Failed to sync accounts:', err)
+    } finally {
+      setIsSyncing(false)
     }
   }, [accounts, fetchStatus])
 
@@ -141,6 +154,43 @@ export function ProxyPanel() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // 刷新模型缓存
+  const handleRefreshModels = async () => {
+    setIsRefreshingModels(true)
+    setRefreshSuccess(false)
+    try {
+      const result = await window.api.proxyRefreshModels()
+      if (result.success) {
+        setRefreshSuccess(true)
+        setTimeout(() => setRefreshSuccess(false), 2000)
+      } else {
+        setError(result.error || (isEn ? 'Failed to refresh models' : '刷新模型失败'))
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setIsRefreshingModels(false)
+    }
+  }
+
+  // 加载历史日志
+  useEffect(() => {
+    window.api.proxyLoadLogs().then(result => {
+      if (result.success && result.logs.length > 0) {
+        setRecentLogs(result.logs)
+      }
+    })
+  }, [])
+
+  // 保存日志（防抖）
+  useEffect(() => {
+    if (recentLogs.length === 0) return
+    const timer = setTimeout(() => {
+      window.api.proxySaveLogs(recentLogs)
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [recentLogs])
+
   // 初始化
   useEffect(() => {
     fetchStatus()
@@ -156,7 +206,7 @@ export function ProxyPanel() {
         path: info.path,
         status: info.status,
         tokens: info.tokens
-      }, ...prev.slice(0, 19)])
+      }, ...prev.slice(0, 99)]) // 保留最多 100 条
 
       // 更新统计
       fetchStatus()
@@ -253,9 +303,13 @@ export function ProxyPanel() {
                 {isEn ? 'Stop Service' : '停止服务'}
               </Button>
             )}
-            <Button onClick={syncAccounts} variant="outline" className="gap-2" disabled={!isRunning}>
-              <RefreshCw className="h-4 w-4" />
-              {isEn ? 'Sync Accounts' : '同步账号'}
+            <Button onClick={syncAccounts} variant="outline" className="gap-2" disabled={!isRunning || isSyncing}>
+              {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : syncSuccess ? <Check className="h-4 w-4 text-green-500" /> : <RefreshCw className="h-4 w-4" />}
+              {isSyncing ? (isEn ? 'Syncing...' : '同步中...') : syncSuccess ? (isEn ? 'Synced!' : '已同步') : (isEn ? 'Sync Accounts' : '同步账号')}
+            </Button>
+            <Button onClick={handleRefreshModels} variant="outline" className="gap-2" disabled={!isRunning || isRefreshingModels}>
+              {isRefreshingModels ? <Loader2 className="h-4 w-4 animate-spin" /> : refreshSuccess ? <Check className="h-4 w-4 text-green-500" /> : <RefreshCw className="h-4 w-4" />}
+              {isRefreshingModels ? (isEn ? 'Refreshing...' : '刷新中...') : refreshSuccess ? (isEn ? 'Refreshed!' : '已刷新') : (isEn ? 'Refresh Models' : '刷新模型')}
             </Button>
           </div>
 
@@ -293,7 +347,19 @@ export function ProxyPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="host">{isEn ? 'Host' : '监听地址'}</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="host">{isEn ? 'Host' : '监听地址'}</Label>
+                <div className="flex items-center gap-1.5">
+                  <Switch
+                    id="publicAccess"
+                    checked={config.host === '0.0.0.0'}
+                    onCheckedChange={(checked) => setConfig(prev => ({ ...prev, host: checked ? '0.0.0.0' : '127.0.0.1' }))}
+                    disabled={isRunning}
+                    className="scale-75"
+                  />
+                  <Label htmlFor="publicAccess" className="text-xs cursor-pointer">{isEn ? 'Public' : '外网'}</Label>
+                </div>
+              </div>
               <Input
                 id="host"
                 value={config.host}
@@ -317,7 +383,18 @@ export function ProxyPanel() {
             <p className="text-xs text-muted-foreground">{isEn ? 'When set, requests must provide this key in Authorization or X-Api-Key header' : '设置后，请求需要在 Authorization 或 X-Api-Key 头中提供此密钥'}</p>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="autoStart"
+                checked={config.autoStart || false}
+                onCheckedChange={(checked) => {
+                  setConfig(prev => ({ ...prev, autoStart: checked }))
+                  window.api.proxyUpdateConfig({ autoStart: checked })
+                }}
+              />
+              <Label htmlFor="autoStart">{isEn ? 'Auto Start' : '随软件启动'}</Label>
+            </div>
             <div className="flex items-center gap-2">
               <Switch
                 id="multiAccount"
@@ -325,7 +402,7 @@ export function ProxyPanel() {
                 onCheckedChange={(checked) => setConfig(prev => ({ ...prev, enableMultiAccount: checked }))}
                 disabled={isRunning}
               />
-              <Label htmlFor="multiAccount">{isEn ? 'Multi-Account Rotation' : '多账号轮询'}</Label>
+              <Label htmlFor="multiAccount">{isEn ? 'Multi-Account' : '多账号轮询'}</Label>
             </div>
             <div className="flex items-center gap-2">
               <Switch
@@ -333,7 +410,7 @@ export function ProxyPanel() {
                 checked={config.logRequests}
                 onCheckedChange={(checked) => setConfig(prev => ({ ...prev, logRequests: checked }))}
               />
-              <Label htmlFor="logRequests">{isEn ? 'Log Requests' : '记录请求日志'}</Label>
+              <Label htmlFor="logRequests">{isEn ? 'Log Requests' : '记录日志'}</Label>
             </div>
           </div>
 
@@ -463,6 +540,41 @@ export function ProxyPanel() {
         </CardContent>
       </Card>
 
+      {/* 最近请求日志 */}
+      {recentLogs.length > 0 && (
+        <Card className="border-0 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-primary/10">
+                  <Activity className="h-4 w-4 text-primary" />
+                </div>
+                {isEn ? 'Recent Requests' : '最近请求'}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-xs">{recentLogs.length}</Badge>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShowLogsDialog(true)}>
+                  <FileText className="h-3 w-3 mr-1" />
+                  {isEn ? 'View All' : '查看全部'}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2">
+            <div className="max-h-[150px] overflow-y-auto text-xs font-mono space-y-0.5">
+              {recentLogs.slice(0, 5).map((log, idx) => (
+                <div key={idx} className="flex items-center gap-3 py-1 px-2 rounded hover:bg-muted/50">
+                  <span className="text-muted-foreground shrink-0">{log.time}</span>
+                  <span className="truncate" title={log.path}>{log.path}</span>
+                  <span className={`shrink-0 ml-auto ${log.status >= 400 ? 'text-red-500' : 'text-green-500'}`}>{log.status}</span>
+                  {log.tokens ? <span className="text-muted-foreground shrink-0">{log.tokens}</span> : null}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 功能说明 */}
       <Card className="border-0 shadow-sm hover:shadow-md transition-shadow duration-200">
         <CardHeader className="pb-2">
@@ -511,33 +623,17 @@ export function ProxyPanel() {
         </CardContent>
       </Card>
 
-      {/* 最近请求日志 */}
-      {recentLogs.length > 0 && (
-        <Card className="border-0 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-orange-500/10">
-                <Activity className="h-4 w-4 text-orange-500" />
-              </div>
-              {isEn ? 'Recent Requests' : '最近请求'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-[200px] overflow-auto space-y-1 text-sm font-mono">
-              {recentLogs.map((log, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-muted-foreground">{log.time}</span>
-                  <span className="flex-1">{log.path}</span>
-                  <Badge variant={log.status === 200 ? 'default' : 'destructive'}>
-                    {log.status}
-                  </Badge>
-                  {log.tokens && <span className="text-muted-foreground">{log.tokens} tokens</span>}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* 日志弹窗 */}
+      <ProxyLogsDialog
+        open={showLogsDialog}
+        onOpenChange={setShowLogsDialog}
+        logs={recentLogs}
+        onClearLogs={() => {
+          setRecentLogs([])
+          window.api.proxySaveLogs([])
+        }}
+        isEn={isEn}
+      />
     </div>
   )
 }

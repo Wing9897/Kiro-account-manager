@@ -739,6 +739,24 @@ function createWindow(): void {
     // 设置带版本号的标题（HTML 加载后会覆盖初始标题）
     mainWindow?.setTitle(`Kiro 账号管理器 v${app.getVersion()}`)
     mainWindow?.show()
+    
+    // 检查代理服务自启动配置
+    if (store) {
+      const savedProxyConfig = store.get('proxyConfig') as ProxyConfig | undefined
+      if (savedProxyConfig?.autoStart) {
+        console.log('[ProxyServer] Auto-starting proxy server...')
+        setTimeout(async () => {
+          try {
+            const server = initProxyServer()
+            server.updateConfig(savedProxyConfig)
+            await server.start()
+            console.log('[ProxyServer] Auto-started successfully on port', savedProxyConfig.port || 5580)
+          } catch (error) {
+            console.error('[ProxyServer] Auto-start failed:', error)
+          }
+        }, 1000) // 延迟 1 秒等待渲染进程加载完成
+      }
+    }
   })
 
   mainWindow.on('close', async () => {
@@ -3204,7 +3222,12 @@ app.whenReady().then(() => {
     try {
       const server = initProxyServer()
       server.updateConfig(config)
-      return { success: true, config: server.getConfig() }
+      const newConfig = server.getConfig()
+      // 保存配置到 store（用于自启动）
+      if (store) {
+        store.set('proxyConfig', newConfig)
+      }
+      return { success: true, config: newConfig }
     } catch (error) {
       console.error('[ProxyServer] Update config failed:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Failed to update config' }
@@ -3260,6 +3283,46 @@ app.whenReady().then(() => {
     return {
       accounts: pool.getAllAccounts(),
       availableCount: pool.availableCount
+    }
+  })
+
+  // IPC: 刷新模型缓存
+  ipcMain.handle('proxy-refresh-models', () => {
+    if (!proxyServer) {
+      return { success: false, error: 'Proxy server not initialized' }
+    }
+    proxyServer.clearModelCache()
+    return { success: true }
+  })
+
+  // 代理日志持久化
+  const getProxyLogsPath = (): string => join(app.getPath('userData'), 'proxy-logs.json')
+  const MAX_LOGS = 100
+
+  // IPC: 保存代理日志
+  ipcMain.handle('proxy-save-logs', async (_event, logs: Array<{ time: string; path: string; status: number; tokens?: number }>) => {
+    try {
+      const logsPath = getProxyLogsPath()
+      // 只保留最近 100 条
+      const trimmedLogs = logs.slice(0, MAX_LOGS)
+      await writeFile(logsPath, JSON.stringify(trimmedLogs, null, 2), 'utf-8')
+      return { success: true }
+    } catch (error) {
+      console.error('[ProxyLogs] Save failed:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to save logs' }
+    }
+  })
+
+  // IPC: 加载代理日志
+  ipcMain.handle('proxy-load-logs', async () => {
+    try {
+      const logsPath = getProxyLogsPath()
+      const content = await readFile(logsPath, 'utf-8')
+      const logs = JSON.parse(content)
+      return { success: true, logs }
+    } catch (error) {
+      // 文件不存在是正常的
+      return { success: true, logs: [] }
     }
   })
 

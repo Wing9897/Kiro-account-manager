@@ -556,6 +556,21 @@ const api = {
     return ipcRenderer.invoke('proxy-reset-pool')
   },
 
+  // 刷新模型缓存
+  proxyRefreshModels: (): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('proxy-refresh-models')
+  },
+
+  // 保存代理日志
+  proxySaveLogs: (logs: Array<{ time: string; path: string; status: number; tokens?: number }>): Promise<{ success: boolean; error?: string }> => {
+    return ipcRenderer.invoke('proxy-save-logs', logs)
+  },
+
+  // 加载代理日志
+  proxyLoadLogs: (): Promise<{ success: boolean; logs: Array<{ time: string; path: string; status: number; tokens?: number }> }> => {
+    return ipcRenderer.invoke('proxy-load-logs')
+  },
+
   // 监听反代请求事件
   onProxyRequest: (callback: (info: { path: string; method: string; accountId?: string }) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, info: { path: string; method: string; accountId?: string }): void => {

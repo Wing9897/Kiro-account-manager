@@ -69,16 +69,27 @@ const THINKING_MODE_PROMPT = `<thinking_mode>enabled</thinking_mode>
 
 // 模型 ID 映射
 const MODEL_ID_MAP: Record<string, string> = {
-  'gpt-4': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'gpt-4o': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'gpt-4-turbo': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'gpt-3.5-turbo': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'claude-3-5-sonnet': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'claude-3-opus': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'claude-3-sonnet': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'claude-3-haiku': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'claude-sonnet-4': 'anthropic.claude-sonnet-4-20250514-v1:0',
-  'default': 'anthropic.claude-sonnet-4-20250514-v1:0'
+  // Claude 4.5 系列
+  'claude-sonnet-4-5': 'claude-sonnet-4.5',
+  'claude-sonnet-4.5': 'claude-sonnet-4.5',
+  'claude-haiku-4-5': 'claude-haiku-4.5',
+  'claude-haiku-4.5': 'claude-haiku-4.5',
+  'claude-opus-4-5': 'claude-opus-4.5',
+  'claude-opus-4.5': 'claude-opus-4.5',
+  // Claude 4 系列
+  'claude-sonnet-4': 'claude-sonnet-4',
+  'claude-sonnet-4-20250514': 'claude-sonnet-4',
+  // Claude 3.5 系列 (映射到 Sonnet 4.5)
+  'claude-3-5-sonnet': 'claude-sonnet-4.5',
+  'claude-3-opus': 'claude-sonnet-4.5',
+  'claude-3-sonnet': 'claude-sonnet-4',
+  'claude-3-haiku': 'claude-haiku-4.5',
+  // GPT 兼容映射 (映射到 Sonnet 4.5)
+  'gpt-4': 'claude-sonnet-4.5',
+  'gpt-4o': 'claude-sonnet-4.5',
+  'gpt-4-turbo': 'claude-sonnet-4.5',
+  'gpt-3.5-turbo': 'claude-sonnet-4.5',
+  'default': 'claude-sonnet-4.5'
 }
 
 export function mapModelId(model: string): string {
@@ -297,6 +308,55 @@ export async function callKiroApiStream(
   }
 }
 
+// 从 headers 中提取 event type
+function extractEventType(headers: Uint8Array): string {
+  let offset = 0
+  while (offset < headers.length) {
+    if (offset >= headers.length) break
+    const nameLen = headers[offset]
+    offset++
+    if (offset + nameLen > headers.length) break
+    const name = new TextDecoder().decode(headers.slice(offset, offset + nameLen))
+    offset += nameLen
+    if (offset >= headers.length) break
+    const valueType = headers[offset]
+    offset++
+    
+    if (valueType === 7) { // String type
+      if (offset + 2 > headers.length) break
+      const valueLen = (headers[offset] << 8) | headers[offset + 1]
+      offset += 2
+      if (offset + valueLen > headers.length) break
+      const value = new TextDecoder().decode(headers.slice(offset, offset + valueLen))
+      offset += valueLen
+      if (name === ':event-type') {
+        return value
+      }
+      continue
+    }
+    
+    // Skip other value types
+    const skipSizes: Record<number, number> = { 0: 0, 1: 0, 2: 1, 3: 2, 4: 4, 5: 8, 8: 8, 9: 16 }
+    if (valueType === 6) {
+      if (offset + 2 > headers.length) break
+      const len = (headers[offset] << 8) | headers[offset + 1]
+      offset += 2 + len
+    } else if (skipSizes[valueType] !== undefined) {
+      offset += skipSizes[valueType]
+    } else {
+      break
+    }
+  }
+  return ''
+}
+
+// Tool Use 状态跟踪
+interface ToolUseState {
+  toolUseId: string
+  name: string
+  inputBuffer: string
+}
+
 // 解析 AWS Event Stream 二进制格式
 async function parseEventStream(
   body: ReadableStream<Uint8Array>,
@@ -306,9 +366,11 @@ async function parseEventStream(
 ): Promise<void> {
   const reader = body.getReader()
   let buffer = new Uint8Array(0)
-  let accumulatedContent = ''
-  let toolUses: KiroToolUse[] = []
   let usage = { inputTokens: 0, outputTokens: 0 }
+  
+  // Tool use 状态跟踪 - 用于累积输入片段
+  let currentToolUse: ToolUseState | null = null
+  const processedIds = new Set<string>()
 
   try {
     while (true) {
@@ -342,7 +404,12 @@ async function parseEventStream(
 
         const headersLength = new DataView(buffer.buffer, buffer.byteOffset).getUint32(4, false)
         
-        // 跳过 prelude (12 bytes) 和 headers
+        // 从 headers 中提取 event type
+        const headersStart = 12
+        const headersEnd = 12 + headersLength
+        const eventType = extractEventType(buffer.slice(headersStart, headersEnd))
+        
+        // 提取 payload
         const payloadStart = 12 + headersLength
         const payloadEnd = totalLength - 4 // 减去 message CRC
         
@@ -353,46 +420,176 @@ async function parseEventStream(
             const payloadText = new TextDecoder().decode(payloadBytes)
             const event = JSON.parse(payloadText)
             
-            // 处理不同类型的事件
-            if (event.assistantResponseEvent) {
-              const content = event.assistantResponseEvent.content
+            // 根据 event type 处理不同类型的事件
+            if (eventType === 'assistantResponseEvent' || event.assistantResponseEvent) {
+              const assistantResp = event.assistantResponseEvent || event
+              const content = assistantResp.content
               if (content) {
-                accumulatedContent += content
                 onChunk(content)
               }
             }
             
-            if (event.toolUseEvent) {
-              const toolUse: KiroToolUse = {
-                toolUseId: event.toolUseEvent.toolUseId || uuidv4(),
-                name: event.toolUseEvent.name,
-                input: event.toolUseEvent.input || {}
+            if (eventType === 'toolUseEvent' || event.toolUseEvent) {
+              const toolUseData = event.toolUseEvent || event
+              const toolUseId = toolUseData.toolUseId
+              const toolName = toolUseData.name
+              const isStop = toolUseData.stop === true
+              
+              // 获取输入 - 可能是字符串片段或完整对象
+              let inputFragment = ''
+              let inputObj: Record<string, unknown> | null = null
+              if (typeof toolUseData.input === 'string') {
+                inputFragment = toolUseData.input
+              } else if (typeof toolUseData.input === 'object' && toolUseData.input !== null) {
+                inputObj = toolUseData.input
               }
-              toolUses.push(toolUse)
-              onChunk('', toolUse)
+              
+              // 新的 tool use 开始
+              if (toolUseId && toolName) {
+                if (currentToolUse && currentToolUse.toolUseId !== toolUseId) {
+                  // 前一个 tool use 被中断，完成它
+                  if (!processedIds.has(currentToolUse.toolUseId)) {
+                    let finalInput: Record<string, unknown> = {}
+                    try {
+                      if (currentToolUse.inputBuffer) {
+                        finalInput = JSON.parse(currentToolUse.inputBuffer)
+                      }
+                    } catch { /* 忽略解析错误 */ }
+                    onChunk('', {
+                      toolUseId: currentToolUse.toolUseId,
+                      name: currentToolUse.name,
+                      input: finalInput
+                    })
+                    processedIds.add(currentToolUse.toolUseId)
+                  }
+                  currentToolUse = null
+                }
+                
+                if (!currentToolUse) {
+                  if (processedIds.has(toolUseId)) {
+                    // 跳过重复的 tool use
+                  } else {
+                    currentToolUse = {
+                      toolUseId,
+                      name: toolName,
+                      inputBuffer: ''
+                    }
+                  }
+                }
+              }
+              
+              // 累积输入片段
+              if (currentToolUse && inputFragment) {
+                currentToolUse.inputBuffer += inputFragment
+              }
+              
+              // 如果直接提供了完整输入对象
+              if (currentToolUse && inputObj) {
+                currentToolUse.inputBuffer = JSON.stringify(inputObj)
+              }
+              
+              // Tool use 完成
+              if (isStop && currentToolUse) {
+                let finalInput: Record<string, unknown> = {}
+                try {
+                  if (currentToolUse.inputBuffer) {
+                    finalInput = JSON.parse(currentToolUse.inputBuffer)
+                  }
+                } catch { /* 忽略解析错误 */ }
+                
+                onChunk('', {
+                  toolUseId: currentToolUse.toolUseId,
+                  name: currentToolUse.name,
+                  input: finalInput
+                })
+                processedIds.add(currentToolUse.toolUseId)
+                currentToolUse = null
+              }
             }
             
-            if (event.usageEvent) {
-              usage.inputTokens = event.usageEvent.inputTokens || 0
-              usage.outputTokens = event.usageEvent.outputTokens || 0
+            // 处理 messageMetadataEvent - 包含 token 使用量
+            if (eventType === 'messageMetadataEvent' || eventType === 'metadataEvent' || event.messageMetadataEvent || event.metadataEvent) {
+              const metadata = event.messageMetadataEvent || event.metadataEvent || event
+              console.log('[Kiro] messageMetadataEvent:', JSON.stringify(metadata))
+              
+              // 检查 tokenUsage 对象
+              if (metadata.tokenUsage) {
+                const tokenUsage = metadata.tokenUsage
+                console.log('[Kiro] tokenUsage:', JSON.stringify(tokenUsage))
+                // 计算 inputTokens = uncachedInputTokens + cacheReadInputTokens + cacheWriteInputTokens
+                const uncached = tokenUsage.uncachedInputTokens || 0
+                const cacheRead = tokenUsage.cacheReadInputTokens || 0
+                const cacheWrite = tokenUsage.cacheWriteInputTokens || 0
+                const calculatedInput = uncached + cacheRead + cacheWrite
+                
+                if (calculatedInput > 0) usage.inputTokens = calculatedInput
+                if (tokenUsage.outputTokens) usage.outputTokens = tokenUsage.outputTokens
+                if (tokenUsage.totalTokens) {
+                  // 如果有 totalTokens，用它来推算
+                  if (usage.inputTokens === 0 && usage.outputTokens > 0) {
+                    usage.inputTokens = tokenUsage.totalTokens - usage.outputTokens
+                  }
+                }
+                console.log('[Kiro] Parsed usage:', usage)
+              }
+              
+              // 直接在 metadata 中的 tokens
+              if (metadata.inputTokens) usage.inputTokens = metadata.inputTokens
+              if (metadata.outputTokens) usage.outputTokens = metadata.outputTokens
             }
             
-            if (event.endOfStreamEvent) {
-              // 流结束
+            // 调试：打印所有事件类型
+            if (eventType && !['contentBlockDelta', 'contentBlockStart', 'contentBlockStop', 'messageStart', 'messageStop'].includes(eventType)) {
+              console.log('[Kiro] Event:', eventType, JSON.stringify(event).substring(0, 200))
             }
             
-            if (event.error) {
-              throw new Error(event.error.message || 'Unknown stream error')
+            // 处理 usageEvent
+            if (eventType === 'usageEvent' || eventType === 'usage' || event.usageEvent || event.usage) {
+              const usageData = event.usageEvent || event.usage || event
+              if (usageData.inputTokens) usage.inputTokens = usageData.inputTokens
+              if (usageData.outputTokens) usage.outputTokens = usageData.outputTokens
+            }
+            
+            // 检查 supplementaryWebLinksEvent 中的 usage
+            if (event.supplementaryWebLinksEvent) {
+              const webLinks = event.supplementaryWebLinksEvent
+              if (webLinks.inputTokens) usage.inputTokens = webLinks.inputTokens
+              if (webLinks.outputTokens) usage.outputTokens = webLinks.outputTokens
+            }
+            
+            // 检查错误
+            if (event._type || event.error) {
+              const errMsg = event.message || event.error?.message || 'Unknown stream error'
+              throw new Error(errMsg)
             }
           } catch (parseError) {
-            // 忽略解析错误，可能是二进制数据
-            console.debug('[EventStream] Parse error:', parseError)
+            if (parseError instanceof SyntaxError) {
+              // JSON 解析错误，忽略
+              console.debug('[EventStream] JSON parse error:', parseError)
+            } else {
+              throw parseError
+            }
           }
         }
         
         // 移动到下一条消息
         buffer = buffer.slice(totalLength)
       }
+    }
+    
+    // 完成任何未完成的 tool use
+    if (currentToolUse && !processedIds.has(currentToolUse.toolUseId)) {
+      let finalInput: Record<string, unknown> = {}
+      try {
+        if (currentToolUse.inputBuffer) {
+          finalInput = JSON.parse(currentToolUse.inputBuffer)
+        }
+      } catch { /* 忽略解析错误 */ }
+      onChunk('', {
+        toolUseId: currentToolUse.toolUseId,
+        name: currentToolUse.name,
+        input: finalInput
+      })
     }
     
     onComplete(usage)
@@ -435,4 +632,47 @@ export async function callKiroApi(
       signal
     )
   })
+}
+
+// Kiro 官方模型信息
+export interface KiroModel {
+  modelId: string
+  modelName: string
+  description: string
+  rateMultiplier?: number
+  rateUnit?: string
+  supportedInputTypes?: string[]
+  tokenLimits?: {
+    maxInputTokens?: number | null
+    maxOutputTokens?: number | null
+  }
+}
+
+// 获取 Kiro 官方模型列表
+export async function fetchKiroModels(account: ProxyAccount): Promise<KiroModel[]> {
+  const url = 'https://codewhisperer.us-east-1.amazonaws.com/ListAvailableModels?origin=AI_EDITOR&maxResults=50'
+  
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${account.accessToken}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'User-Agent': KIRO_USER_AGENT,
+    'x-amz-user-agent': KIRO_AMZ_USER_AGENT,
+    'x-amzn-codewhisperer-optout': 'true'
+  }
+
+  try {
+    const response = await fetch(url, { method: 'GET', headers })
+    
+    if (!response.ok) {
+      console.error('[KiroAPI] ListAvailableModels failed:', response.status)
+      return []
+    }
+
+    const data = await response.json()
+    return data.models || []
+  } catch (error) {
+    console.error('[KiroAPI] ListAvailableModels error:', error)
+    return []
+  }
 }

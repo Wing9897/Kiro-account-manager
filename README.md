@@ -271,6 +271,19 @@ The project is configured with GitHub Actions workflow for auto building all pla
 
 ## 📋 Changelog
 
+### v1.3.5 (2025-01-17)
+- 🌐 **API Proxy Page i18n**: API Proxy Service page now supports English/Chinese language switching
+- 📋 **Request Logs Display**: Added recent request logs display panel in API Proxy Service page
+- 💾 **Log Persistence**: Request logs are now persisted to file and preserved after restart
+- 📊 **Logs Dialog**: View all logs in a popup dialog with export and clear functions
+- 🔄 **Dynamic Model Fetching**: Fetch models from Kiro API and merge with preset models
+- 🔄 **Refresh Models**: Added button to manually refresh model cache
+- 🚀 **Auto Start**: API Proxy Service can now auto-start when application launches
+- 🔄 **Auto Restart**: Auto restart proxy service when it crashes unexpectedly (if auto-start enabled)
+- 🌐 **Public Access Switch**: Quick toggle to switch between local (127.0.0.1) and public (0.0.0.0) access
+- 📊 **Token Usage Fix**: Fixed token count not displaying in request logs
+- 🔐 **Copy Access Token**: Can now copy Access Token when editing account or copying credentials
+
 ### v1.3.4 (2025-01-16)
 - 🐛 **Multi-Account Active State Fix**: Fixed the issue where multiple accounts showed "Active" status simultaneously on some devices
 - ✨ **Glow Border Effect**: Added animated glow border effect for the currently active account card

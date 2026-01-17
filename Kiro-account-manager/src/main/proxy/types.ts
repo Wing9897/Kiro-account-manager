@@ -259,6 +259,8 @@ export interface ProxyConfig {
   tokenRefreshBeforeExpiry?: number
   // TLS/HTTPS 配置
   tls?: TlsConfig
+  // 自动启动
+  autoStart?: boolean
 }
 
 export interface TlsConfig {

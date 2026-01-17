@@ -15,7 +15,7 @@ import sys
 BASE_URL = "https://codewhisperer.us-east-1.amazonaws.com"
 
 # 请在这里填入你的 Access Token
-ACCESS_TOKEN = "aoaAAAAAGlbzWspxRfyqpu80tx9M5O1kqynWPyWQnF22QVGvOojqygHVueE1_lRWeOBD7cmgkknL_SO_qIFMBH3_UBkc0:MGQCMEh4b+zziLyD9ufVxzfskUMg23I995Ld/7vSZGOedoKB7UZM20UhnpijLCtrbhyr2QIweYLD3MA7PqKPfq23cQdfoFXQA/+wqP212VDbfcK9GGSItMDfQ8lkBPNSRy9DEXqV"
+ACCESS_TOKEN = "aoaAAAAAGlq6cYp3k8U77cJ5XIuYUM2edG8ltPn8Theu3FLG4hKzCT96vKb_VMRx1E14pP0iBukLSGA04BBnz5X7QBkc0:MGQCMBKZvgKladdqqg+4RZp1THGD81uAxnECEi6DtdMZLMvfPzbPvwZQz4IEeMkmzm8NSQIwYmo2WbzdUXhhuHGXItj44enmSnAKR1SifmNUHiMugxjn18zu15Xl4PaXeXTe8fTk"
 
 
 def get_headers():

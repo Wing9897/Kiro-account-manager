@@ -12,7 +12,7 @@ import type {
   TokenRefreshCallback
 } from './types'
 import { AccountPool } from './accountPool'
-import { callKiroApiStream, callKiroApi } from './kiroApi'
+import { callKiroApiStream, callKiroApi, fetchKiroModels, type KiroModel } from './kiroApi'
 import {
   openaiToKiro,
   claudeToKiro,
@@ -52,6 +52,7 @@ export class ProxyServer {
       maxRetries: 3,
       retryDelayMs: 1000,
       tokenRefreshBeforeExpiry: 300, // 5分钟提前刷新
+      autoStart: false, // 是否自动启动
       ...config
     }
     this.accountPool = new AccountPool()
@@ -106,6 +107,21 @@ export class ProxyServer {
           reject(error)
         }
         this.events.onError?.(error)
+      })
+
+      // 服务器关闭时尝试自动重启
+      this.server.on('close', () => {
+        if (this.config.autoStart && this.config.enabled) {
+          console.log('[ProxyServer] Server closed unexpectedly, attempting restart in 3s...')
+          setTimeout(() => {
+            if (this.config.autoStart && !this.isRunning()) {
+              console.log('[ProxyServer] Auto-restarting...')
+              this.start().catch(err => {
+                console.error('[ProxyServer] Auto-restart failed:', err)
+              })
+            }
+          }, 3000)
+        }
       })
 
       const protocol = this.isHttps ? 'https' : 'http'
@@ -179,6 +195,12 @@ export class ProxyServer {
   // 是否运行中
   isRunning(): boolean {
     return this.server !== null
+  }
+
+  // 清除模型缓存，强制下次请求重新获取
+  clearModelCache(): void {
+    this.modelCache = null
+    console.log('[ProxyServer] Model cache cleared')
   }
 
   // 检查 Token 是否需要刷新
@@ -519,18 +541,76 @@ export class ProxyServer {
     }))
   }
 
+  // 模型列表缓存
+  private modelCache: { models: KiroModel[]; timestamp: number } | null = null
+  private readonly MODEL_CACHE_TTL = 5 * 60 * 1000 // 5 分钟缓存
+
   // 模型列表
   private async handleModels(res: http.ServerResponse): Promise<void> {
-    const models = [
-      { id: 'claude-sonnet-4', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' },
-      { id: 'claude-3-5-sonnet', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' },
-      { id: 'gpt-4o', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' },
-      { id: 'gpt-4', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' },
-      { id: 'gpt-4-turbo', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' },
-      { id: 'gpt-3.5-turbo', object: 'model', created: Date.now(), owned_by: 'kiro-proxy' }
+    const now = Date.now()
+    
+    // 预设模型（兼容 OpenAI 格式）
+    const presetModels = [
+      { id: 'gpt-4o', object: 'model', created: now, owned_by: 'kiro-proxy' },
+      { id: 'gpt-4', object: 'model', created: now, owned_by: 'kiro-proxy' },
+      { id: 'gpt-4-turbo', object: 'model', created: now, owned_by: 'kiro-proxy' },
+      { id: 'gpt-3.5-turbo', object: 'model', created: now, owned_by: 'kiro-proxy' }
     ]
+
+    // 尝试从 Kiro API 获取动态模型
+    let kiroModels: KiroModel[] = []
+    
+    // 检查缓存
+    if (this.modelCache && (now - this.modelCache.timestamp) < this.MODEL_CACHE_TTL) {
+      kiroModels = this.modelCache.models
+    } else {
+      // 获取一个可用账号来请求模型列表
+      const account = this.accountPool.getNextAccount()
+      if (account) {
+        try {
+          kiroModels = await fetchKiroModels(account)
+          if (kiroModels.length > 0) {
+            this.modelCache = { models: kiroModels, timestamp: now }
+            console.log(`[ProxyServer] Fetched ${kiroModels.length} models from Kiro API`)
+          }
+        } catch (error) {
+          console.error('[ProxyServer] Failed to fetch Kiro models:', error)
+        }
+      }
+    }
+
+    // 转换 Kiro 模型为 OpenAI 格式
+    const dynamicModels = kiroModels.map(m => ({
+      id: m.modelId.replace(/\./g, '-'), // claude-sonnet-4.5 -> claude-sonnet-4-5
+      object: 'model' as const,
+      created: now,
+      owned_by: 'kiro-api',
+      description: m.description,
+      model_name: m.modelName
+    }))
+
+    // 合并模型列表（动态 + 预设），去重
+    const modelIds = new Set<string>()
+    const allModels: Array<{ id: string; object: string; created: number; owned_by: string; description?: string; model_name?: string }> = []
+    
+    // 先添加动态模型
+    for (const m of dynamicModels) {
+      if (!modelIds.has(m.id)) {
+        modelIds.add(m.id)
+        allModels.push(m)
+      }
+    }
+    
+    // 再添加预设模型
+    for (const m of presetModels) {
+      if (!modelIds.has(m.id)) {
+        modelIds.add(m.id)
+        allModels.push(m)
+      }
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ object: 'list', data: models }))
+    res.end(JSON.stringify({ object: 'list', data: allModels }))
   }
 
   // 处理 OpenAI Chat Completions 请求

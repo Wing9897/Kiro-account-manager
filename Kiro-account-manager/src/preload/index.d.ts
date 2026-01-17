@@ -497,7 +497,7 @@ interface KiroApi {
   proxyGetStatus: () => Promise<{ running: boolean; config: unknown; stats: unknown }>
 
   // 更新反代服务器配置
-  proxyUpdateConfig: (config: { port?: number; host?: string; enableMultiAccount?: boolean; logRequests?: boolean }) => Promise<{ success: boolean; config?: unknown; error?: string }>
+  proxyUpdateConfig: (config: { port?: number; host?: string; enableMultiAccount?: boolean; logRequests?: boolean; autoStart?: boolean }) => Promise<{ success: boolean; config?: unknown; error?: string }>
 
   // 添加账号到反代池
   proxyAddAccount: (account: { id: string; email?: string; accessToken: string; refreshToken?: string; profileArn?: string; expiresAt?: number }) => Promise<{ success: boolean; accountCount?: number; error?: string }>
@@ -513,6 +513,15 @@ interface KiroApi {
 
   // 重置反代池状态
   proxyResetPool: () => Promise<{ success: boolean; error?: string }>
+
+  // 刷新模型缓存
+  proxyRefreshModels: () => Promise<{ success: boolean; error?: string }>
+
+  // 保存代理日志
+  proxySaveLogs: (logs: Array<{ time: string; path: string; status: number; tokens?: number }>) => Promise<{ success: boolean; error?: string }>
+
+  // 加载代理日志
+  proxyLoadLogs: () => Promise<{ success: boolean; logs: Array<{ time: string; path: string; status: number; tokens?: number }> }>
 
   // 监听反代请求事件
   onProxyRequest: (callback: (info: { path: string; method: string; accountId?: string }) => void) => () => void

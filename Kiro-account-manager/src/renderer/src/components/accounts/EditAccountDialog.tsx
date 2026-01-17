@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Loader2, RefreshCw, Download, CheckCircle } from 'lucide-react'
+import { X, Loader2, RefreshCw, Download, CheckCircle, Copy, Check } from 'lucide-react'
 import { Button, Card, CardContent, CardHeader, CardTitle } from '../ui'
 import { useAccountsStore } from '@/store'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -54,6 +54,15 @@ export function EditAccountDialog({
   // 状态
   const [isVerifying, setIsVerifying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copiedToken, setCopiedToken] = useState(false)
+
+  const handleCopyAccessToken = (): void => {
+    if (accountInfo?.accessToken) {
+      navigator.clipboard.writeText(accountInfo.accessToken)
+      setCopiedToken(true)
+      setTimeout(() => setCopiedToken(false), 2000)
+    }
+  }
 
   // 当账号变化时更新表单
   useEffect(() => {
@@ -295,6 +304,28 @@ export function EditAccountDialog({
             )}
 
             <div className="space-y-4">
+              {/* Access Token (只读，可复制) */}
+              {accountInfo?.accessToken && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Access Token</label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={handleCopyAccessToken}
+                    >
+                      {copiedToken ? <Check className="h-3 w-3 mr-1 text-green-500" /> : <Copy className="h-3 w-3 mr-1" />}
+                      {copiedToken ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy' : '复制')}
+                    </Button>
+                  </div>
+                  <div className="w-full px-3 py-2.5 text-sm rounded-xl border border-input bg-muted/50 font-mono text-muted-foreground truncate">
+                    {accountInfo.accessToken.slice(0, 50)}...
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-sm font-medium">
                   Refresh Token <span className="text-destructive">*</span>

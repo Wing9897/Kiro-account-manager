@@ -214,6 +214,7 @@ export const AccountCard = memo(function AccountCard({
 
   const handleCopyCredentials = (): void => {
     const credentials = {
+      accessToken: account.credentials.accessToken,
       refreshToken: account.credentials.refreshToken,
       clientId: account.credentials.clientId,
       clientSecret: account.credentials.clientSecret
